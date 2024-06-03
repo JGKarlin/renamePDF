@@ -74,7 +74,7 @@ def process_pdf_files(directory, max_pages, max_filename_length):
 directory = input("\nEnter the directory path containing the PDF files: ")
 
 # Maximum number of pages to extract text from
-max_pages = 5
+max_pages = 1
 
 # Maximum length of the generated citation filename
 max_filename_length = 250
