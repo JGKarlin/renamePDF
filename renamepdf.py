@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Created on Mon Jun  3 11:08:56 2024
-@author: jgkarlin
+@author: Jason G. Karlin
 
 This script renames PDF files to their citation based on Chicago bibliography style.
 """
@@ -83,10 +83,10 @@ def process_pdf_files(directory, max_pages, max_filename_length):
 directory = input("\nEnter the directory path containing the PDF files: ")
 
 # Maximum number of pages to extract text from
-max_pages = 10
+max_pages = 6
 
 # Maximum length of the generated citation filename
-max_filename_length = 200
+max_filename_length = 250
 
 # Create the directory if it doesn't exist
 os.makedirs(directory, exist_ok=True)
