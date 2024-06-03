@@ -17,16 +17,6 @@ load_dotenv()
 openai.api_key = os.environ['OPENAI_API_KEY']
 
 def extract_text_from_pdf(pdf_path, max_pages):
-    """
-    Extracts text from a PDF file.
-    
-    Args:
-        pdf_path (str): Path to the PDF file.
-        max_pages (int): Maximum number of pages to extract text from.
-    
-    Returns:
-        str: Extracted text.
-    """
     text = ""
     document = fitz.open(pdf_path)
     num_pages = min(len(document), max_pages)
