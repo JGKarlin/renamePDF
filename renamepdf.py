@@ -43,8 +43,9 @@ def sanitize_filename(filename):
     sanitized = re.sub(r'[<>:"/\\|?*]', '', filename)
     sanitized = sanitized.replace('..pdf', '.pdf')
     sanitized = sanitized.replace('*.pdf', '.pdf')
-    sanitized = sanitized.replace(': ', '-')
-    sanitized = sanitized.replace(':', '-')
+    sanitized = sanitized.replace(': ', '-')  # Replace colons with dashes
+    sanitized = sanitized.replace(':', '-')  # Replace colons with dashes
+    sanitized = sanitized.replace(u'\u201c', '"').replace(u'\u201d', '"').replace(u'\u2018', "'").replace(u'\u2019', "'")
     return sanitized
 
 def process_pdf_files(directory, max_pages, max_filename_length):
