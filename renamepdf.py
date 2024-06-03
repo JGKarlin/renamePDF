@@ -40,7 +40,7 @@ def get_citation(text, filename):
         model="gpt-4o",
         messages=[
             {"role": "system", "content": "You are a helpful assistant that generates citations in Chicago bibliography style. Ensure the citation is complete and accurate."},
-            {"role": "user", "content": f"Find the citation for the following text in Chicago bibliography style. Use the provided text and search online to ensure the citation is complete and accurate. Return with only the citation. Omit webpage and DOI from the citation. The original filename is '{filename}'.\n\n{text}"}
+            {"role": "user", "content": f"Find the citation for the following text in Chicago bibliography style. Use the provided text and search online to ensure the citation is complete and accurate. Return with only the citation. Omit webpages and DOI from the citation. The original filename is '{filename}'.\n\n{text}"}
         ]
     )
     citation = response.choices[0].message.content
@@ -53,8 +53,8 @@ def sanitize_filename(filename):
     sanitized = re.sub(r'[<>:"/\\|?*]', '', filename)
     sanitized = sanitized.replace('..pdf', '.pdf')
     sanitized = sanitized.replace('*.pdf', '.pdf')
-    sanitized = sanitized.replace(': ', '-')  # Replace colons with dashes
-    sanitized = sanitized.replace(':', '-')  # Replace colons with dashes
+    sanitized = sanitized.replace(': ', '-')
+    sanitized = sanitized.replace(':', '-')
     return sanitized
 
 def process_pdf_files(directory, max_pages, max_filename_length):
@@ -73,7 +73,7 @@ def process_pdf_files(directory, max_pages, max_filename_length):
         text = extract_text_from_pdf(filepath, max_pages)
         citation = get_citation(text, filename)
         citation = citation[:max_filename_length]  # Truncate to the specified maximum length
-        citation = citation.replace("/", "-")  # Replace forward slashes with hyphens
+        citation = citation.replace("/", "-")
         new_filename = sanitize_filename(f"{citation}.pdf")
         new_filepath = os.path.join(directory, new_filename)
         os.rename(filepath, new_filepath)
@@ -83,7 +83,7 @@ def process_pdf_files(directory, max_pages, max_filename_length):
 directory = input("\nEnter the directory path containing the PDF files: ")
 
 # Maximum number of pages to extract text from
-max_pages = 6
+max_pages = 5
 
 # Maximum length of the generated citation filename
 max_filename_length = 250
