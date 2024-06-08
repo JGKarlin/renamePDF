@@ -7,7 +7,7 @@ This script renames PDF files based on their citation in Chicago bibliography st
 
 ## Features
 
-- Extracts text from the first few pages of PDF files.
+- Extracts text from the first 3 pages of PDF files (but this variable can be changed since it affects the number of tokens processed)
 - Generates a citation in JSON format using OpenAI's GPT-4.
 - Renames PDF files to their citation in Chicago bibliography style.
 - Adds bibliographic metadata to PDF files.
