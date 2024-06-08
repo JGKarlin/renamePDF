@@ -50,7 +50,7 @@ This script renames PDF files based on their citation in Chicago bibliography st
 
 1. **Run the script:**
     ```bash
-    python renamepdf2.py
+    python renamepdf.py
     ```
 
 2. **Follow the prompts:**
