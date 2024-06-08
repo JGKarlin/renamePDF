@@ -8,6 +8,8 @@ This script renames PDF files to their citation based on Chicago bibliography st
 """
 import os
 import re
+import tempfile
+import shutil
 import openai
 import fitz  # PyMuPDF
 import json
@@ -28,11 +30,20 @@ def extract_text_from_pdf(pdf_path, max_pages):
 
 def get_citation(text, filename):
     prompt = f"""
-    Generate a JSON object for the provided text that includes the following fields: 'description', 'author', 'title', 'subject', and 'keywords'. 
-    
-    - 'description': The full citation of the text; not a description of the text; omit webpage urls and DOI.
+    Generate a valid JSON object for the provided text that includes the following fields: 'description', 'author', 'title', 'subject', and 'keywords'. Do not wrap the json codes in JSON markers.
+
+    The JSON object should adhere to the following structure:
+    {{
+        "description": "Full citation in Chicago style",
+        "author": "Author(s) of the text",
+        "title": "Title of the text",
+        "subject": "One-sentence summary of the text",
+        "keywords": ["keyword1", "keyword2", ...]
+    }}
+
+    - 'description': The full citation of the text; not a description of the text; omit webpage URLs and DOI.
     - 'author': The author(s) of the text.
-    - 'title': The title of the text.
+    - 'title': The title of the text, with parentheses replaced by brackets.
     - 'subject': A one-sentence summary based on the text.
     - 'keywords': A list of keywords, if available in the text.
     
@@ -42,22 +53,16 @@ def get_citation(text, filename):
     """
     
     response = openai.chat.completions.create(
-        model="gpt-4",
+        model="gpt-4o",
         messages=[
             {"role": "system", "content": "You are a helpful assistant that generates citations in JSON format. Ensure the citation is complete and accurate."},
             {"role": "user", "content": prompt}
-        ]
+        ],
+        response_format={
+            "type": "json_object"
+        }
     )
-    
-    citation_json = response.choices[0].message.content.strip()
-
-    # Remove unwanted backticks and any other formatting issues
-    citation_json = citation_json.lstrip("```json").rstrip("```")
-
-    if not citation_json.startswith('{'):
-        print(f"Invalid JSON response for {filename}: {citation_json}")
-        return None
-
+    citation_json = response.choices[0].message.content
     return citation_json
 
 def sanitize_filename(filename):
@@ -80,25 +85,38 @@ def add_metadata_to_pdf(pdf_path, title, author, subject, keywords):
     author = str(author) if author else ""
     subject = str(subject) if subject else ""
     keywords = str(keywords) if keywords else ""
-
-    # Debug print statements
-    print(f"Title: {title}")
-    print(f"Author: {author}")
-    print(f"Subject: {subject}")
-    print(f"Keywords: {keywords}")
     
-    # Add metadata to the document
-    document.set_metadata({
+    # Create a new metadata dictionary
+    metadata = {
         "title": title,
         "author": author,
         "subject": subject,
         "keywords": keywords
-    })
-    
-    new_pdf_path = pdf_path.replace(".pdf", "_with_metadata.pdf")
-    document.save(new_pdf_path)
-    document.close()
-    os.replace(new_pdf_path, pdf_path)
+    }
+
+    # Removing any None values to avoid invalid keys in the metadata
+    metadata = {k: v for k, v in metadata.items() if v}
+
+    try:
+        # Set the new metadata, overwriting any existing metadata
+        document.set_metadata(metadata)
+        
+        # Get the base name of the file
+        base_name = os.path.basename(pdf_path)
+        
+        # Create a temporary directory
+        temp_dir = tempfile.mkdtemp()
+        
+        # Save the modified PDF file to the temporary directory
+        new_pdf_path = os.path.join(temp_dir, f"{base_name}_with_metadata.pdf")
+        document.save(new_pdf_path, garbage=4, deflate=True, clean=True)
+        document.close()
+        
+        # Move the modified PDF file to the original directory
+        shutil.move(new_pdf_path, pdf_path)
+    except Exception as e:
+        print(f"Error setting metadata for {pdf_path}: {str(e)}")
+        document.close()
 
 def process_pdf_files(directory, max_pages, max_filename_length, option):
     while True:
@@ -153,7 +171,7 @@ def process_pdf_files(directory, max_pages, max_filename_length, option):
 
 if __name__ == "__main__":
     directory = input("\nEnter the directory path containing the PDF files: ")
-    max_pages = 3
+    max_pages = 1
     max_filename_length = 250
 
     print("\nWhat bibliographic information would you like to add:")
