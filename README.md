@@ -3,7 +3,7 @@
 
 ## Overview
 
-This script renames PDF files based on their citation in Chicago bibliography style and adds the citation to the PDF metadata. It utilizes OpenAI's GPT-4 to generate the citation from the text extracted from the PDF files.
+This script renames PDF files based on their citation in Chicago bibliography style and adds the citation to the PDF metadata. It utilizes OpenAI's GPT-4o to generate the citation from the text extracted from the PDF files.
 
 ## Features
 
