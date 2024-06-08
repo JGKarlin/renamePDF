@@ -171,8 +171,8 @@ def process_pdf_files(directory, max_pages, max_filename_length, option):
 
 if __name__ == "__main__":
     directory = input("\nEnter the directory path containing the PDF files: ")
-    max_pages = 1
-    max_filename_length = 250
+    max_pages = 3
+    max_filename_length = 225
 
     print("\nWhat bibliographic information would you like to add:")
     print("1. File name")
