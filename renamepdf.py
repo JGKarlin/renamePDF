@@ -141,7 +141,7 @@ def get_citation(text, filename, metadata):
     """
 
     citation_response = openai.chat.completions.create(
-        model="gpt-4",
+        model="gpt-4o",
         messages=[
             {"role": "system", "content": "You are an expert bibliographer. Generate a complete and accurate Chicago style citation based on the provided information."},
             {"role": "user", "content": citation_prompt}
