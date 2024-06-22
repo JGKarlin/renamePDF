@@ -14,6 +14,7 @@ import openai
 import fitz  # PyMuPDF
 import json
 from dotenv import load_dotenv
+from habanero import Crossref
 
 # Load environment variables from .env file
 load_dotenv()
@@ -21,49 +22,135 @@ openai.api_key = os.environ['OPENAI_API_KEY']
 
 def extract_text_from_pdf(pdf_path, max_pages):
     text = ""
+    relevant_metadata = {}
     document = fitz.open(pdf_path)
+    
+    # Extract and filter relevant metadata
+    full_metadata = document.metadata
+    relevant_fields = ['title', 'author']
+    
+    for field in relevant_fields:
+        if field in full_metadata and full_metadata[field]:
+            relevant_metadata[field] = full_metadata[field]
+    
+    # Extract text from pages
     num_pages = min(len(document), max_pages)
     for page_num in range(num_pages):
         page = document.load_page(page_num)
         text += page.get_text()
-    return text
+    
+    document.close()
+    
+    print(f"Extracted metadata: {relevant_metadata}")
+    return text, relevant_metadata
 
-def get_citation(text, filename):
+def get_citation(text, filename, metadata):
+    cr = Crossref()
+
+    # Step 1: Extract citation data from PDF text
     prompt = f"""
-    Generate a valid JSON object for the provided text that includes the following fields: 'description', 'author', 'title', 'subject', and 'keywords'. Do not wrap the json codes in JSON markers.
+    Extract the following information from the provided text:
+    1. Title of the work
+    2. Author(s) name(s)
+    3. Publication year
+    4. Publisher
+    5. Any other relevant bibliographic information
 
-    The JSON object should adhere to the following structure:
-    {{
-        "description": "Full citation in Chicago style",
-        "author": "Author(s) of the text",
-        "title": "Title of the text",
-        "subject": "One-sentence summary of the text",
-        "keywords": ["keyword1", "keyword2", ...]
-    }}
+    Text from first page: {text}
 
-    - 'description': The full citation of the text; not a description of the text; omit webpage URLs and DOI.
-    - 'author': The author(s) of the text.
-    - 'title': The title of the text, with parentheses replaced by brackets.
-    - 'subject': A one-sentence summary based on the text.
-    - 'keywords': A list of keywords, if available in the text.
-    
-    The original filename is '{filename}'.
-    
-    Text: {text}
+    Provide the extracted information in a JSON format.
     """
     
     response = openai.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4",
         messages=[
-            {"role": "system", "content": "You are a helpful assistant that generates citations in JSON format. Ensure the citation is complete and accurate."},
+            {"role": "system", "content": "You are an expert at extracting bibliographic information from academic texts."},
             {"role": "user", "content": prompt}
-        ],
-        response_format={
-            "type": "json_object"
-        }
+        ]
     )
-    citation_json = response.choices[0].message.content
-    return citation_json
+
+    try:
+        pdf_data = json.loads(response.choices[0].message.content)
+    except json.JSONDecodeError:
+        print("Failed to parse JSON from AI response. Using fallback method.")
+        # Fallback: use a simple dictionary with metadata
+        pdf_data = {
+            'title': metadata.get('title', '').strip('[]'),
+            'author': metadata.get('author', ''),
+            'year': '',
+            'publisher': ''
+        }
+
+    # Step 2: Compare and supplement with metadata
+    metadata_title = metadata.get('title', '').strip('[]')
+    metadata_author = metadata.get('author', '')
+    
+    if not pdf_data.get('title') and metadata_title:
+        pdf_data['title'] = metadata_title
+    if not pdf_data.get('author') and metadata_author:
+        pdf_data['author'] = metadata_author
+
+    # Check for disagreements
+    use_crossref = False
+    if pdf_data.get('title') != metadata_title and metadata_title:
+        pdf_data['notes'] = f"Title disagreement. PDF: {pdf_data.get('title')}, Metadata: {metadata_title}"
+        use_crossref = True
+    if pdf_data.get('author') != metadata_author and metadata_author:
+        pdf_data['notes'] = pdf_data.get('notes', '') + f"\nAuthor disagreement. PDF: {pdf_data.get('author')}, Metadata: {metadata_author}"
+        use_crossref = True
+
+    # Step 3: Use Crossref if data is missing or there are disagreements
+    if use_crossref or not all([pdf_data.get('title'), pdf_data.get('author'), pdf_data.get('year'), pdf_data.get('publisher')]):
+        search_query = f"{pdf_data.get('title', '')} {pdf_data.get('author', '')}"
+        try:
+            results = cr.works(query=search_query, limit=1)
+            if results['message']['total-results'] > 0:
+                item = results['message']['items'][0]
+                
+                crossref_data = {
+                    'title': item.get('title', [pdf_data.get('title', '')])[0],
+                    'author': ', '.join([f"{author.get('given', '')} {author.get('family', '')}" for author in item.get('author', [])]) or pdf_data.get('author', ''),
+                    'year': item.get('published-print', {}).get('date-parts', [['']])[0][0] or item.get('published-online', {}).get('date-parts', [['']])[0][0] or pdf_data.get('year', ''),
+                    'publisher': item.get('publisher', '') or pdf_data.get('publisher', ''),
+                    'journal': item.get('container-title', [''])[0],
+                    'volume': item.get('volume', ''),
+                    'issue': item.get('issue', ''),
+                    'page': item.get('page', '')
+                }
+                
+                pdf_data.update(crossref_data)
+                pdf_data['notes'] = pdf_data.get('notes', '') + "\nCitation information supplemented using CrossRef."
+            else:
+                pdf_data['notes'] = pdf_data.get('notes', '') + "\nNo matching results found in CrossRef. Citation may be incomplete."
+        except Exception as e:
+            pdf_data['notes'] = pdf_data.get('notes', '') + f"\nAttempt to verify citation with CrossRef failed: {str(e)}"
+
+    # Generate Chicago style citation
+    citation_prompt = f"""
+    Generate a complete Chicago style citation for the following work:
+    Title: {pdf_data.get('title', '')}
+    Author(s): {pdf_data.get('author', '')}
+    Year: {pdf_data.get('year', '')}
+    Publisher: {pdf_data.get('publisher', '')}
+    Journal: {pdf_data.get('journal', '')}
+    Volume: {pdf_data.get('volume', '')}
+    Issue: {pdf_data.get('issue', '')}
+    Page: {pdf_data.get('page', '')}
+
+    Provide only the citation, no additional text.
+    """
+
+    citation_response = openai.chat.completions.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are an expert bibliographer. Generate a complete and accurate Chicago style citation based on the provided information."},
+            {"role": "user", "content": citation_prompt}
+        ]
+    )
+    
+    pdf_data['citation'] = citation_response.choices[0].message.content.strip()
+
+    return json.dumps(pdf_data)
 
 def sanitize_filename(filename):
     sanitized = re.sub(r'[<>:"/\\|?*]', '', filename)
@@ -135,27 +222,26 @@ def process_pdf_files(directory, max_pages, max_filename_length, option):
 
         for filename in pdf_files:
             filepath = os.path.join(directory, filename)
-            text = extract_text_from_pdf(filepath, max_pages)
-            citation_json = get_citation(text, filename)
-            
-            if not citation_json:
-                print(f"\nFailed to get a valid JSON response for {filename}. The response was empty or invalid.")
-                continue
+            text, metadata = extract_text_from_pdf(filepath, max_pages)
+            citation_json = get_citation(text, filename, metadata)
             
             try:
                 citation_metadata = json.loads(citation_json)
-            except json.JSONDecodeError as e:
-                print(f"\nFailed to decode JSON for {filename}: {e}")
-                print(f"Response was: {citation_json}")
-                continue
+            except json.JSONDecodeError:
+                print(f"Failed to parse citation JSON for {filename}. Using fallback method.")
+                citation_metadata = {
+                    'citation': f"{metadata.get('author', 'Unknown Author')}. {metadata.get('title', 'Unknown Title')}.",
+                    'title': metadata.get('title', 'Unknown Title'),
+                    'author': metadata.get('author', 'Unknown Author')
+                }
 
             title = citation_metadata.get("title", "")
             author = citation_metadata.get("author", "")
             subject = citation_metadata.get("subject", "")
             keywords = citation_metadata.get("keywords", "")
-            description = citation_metadata.get("description", "")
+            citation = citation_metadata.get("citation", "")
 
-            citation_str = description[:225].replace("/", "-")
+            citation_str = citation[:225].replace("/", "-")
 
             if option in ["1", "3"]:
                 new_filename = sanitize_filename(f"{citation_str}.pdf")
@@ -171,7 +257,7 @@ def process_pdf_files(directory, max_pages, max_filename_length, option):
 
 if __name__ == "__main__":
     directory = input("\nEnter the directory path containing the PDF files: ")
-    max_pages = 3
+    max_pages = 1
     max_filename_length = 225
 
     print("\nWhat bibliographic information would you like to add:")
