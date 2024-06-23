@@ -41,7 +41,6 @@ def extract_text_from_pdf(pdf_path, max_pages):
     
     document.close()
     
-    print(f"Extracted metadata: {relevant_metadata}")
     return text, relevant_metadata
 
 def get_citation(text, filename, metadata):
@@ -150,12 +149,29 @@ def get_citation(text, filename, metadata):
     
     pdf_data['citation'] = citation_response.choices[0].message.content.strip()
 
+    # Create shortened author string for filename
+    authors = pdf_data.get('author', '').split(',')
+    if len(authors) > 1:
+        short_author = authors[0].strip() + " et al."
+    else:
+        short_author = authors[0].strip()
+    
+    pdf_data['short_citation'] = f"{short_author}, {pdf_data.get('year', '')}, {pdf_data.get('title', '')[:50]}..."
+
     return json.dumps(pdf_data)
 
 def sanitize_filename(filename):
+    # Remove any existing file extension
+    filename = os.path.splitext(filename)[0]
+    
+    # Sanitize the filename
     sanitized = re.sub(r'[<>:"/\\|?*]', '', filename)
-    sanitized = sanitized.replace('..pdf', '.pdf').replace('*.pdf', '.pdf').replace(': ', '-').replace(':', '-')
+    sanitized = sanitized.replace(': ', '-').replace(':', '-')
     sanitized = sanitized.replace(u'\u201c', '"').replace(u'\u201d', '"').replace(u'\u2018', "'").replace(u'\u2019', "'")
+    
+    # Limit the length and add the .pdf extension
+    sanitized = sanitized[:225] + '.pdf'
+    
     return sanitized
 
 def add_metadata_to_pdf(pdf_path, title, author, subject, keywords):
@@ -241,10 +257,9 @@ def process_pdf_files(directory, max_pages, max_filename_length, option):
             keywords = citation_metadata.get("keywords", "")
             citation = citation_metadata.get("citation", "")
 
-            citation_str = citation[:225].replace("/", "-")
-
             if option in ["1", "3"]:
-                new_filename = sanitize_filename(f"{citation_str}.pdf")
+                short_citation = citation_metadata.get("short_citation", "")
+                new_filename = sanitize_filename(short_citation)
                 new_filepath = os.path.join(directory, new_filename)
                 os.rename(filepath, new_filepath)
                 filepath = new_filepath
@@ -252,7 +267,6 @@ def process_pdf_files(directory, max_pages, max_filename_length, option):
 
             if option in ["2", "3"]:
                 add_metadata_to_pdf(filepath, title, author, subject, keywords)
-                print(f"\nAdded metadata to: {filename}")
         break
 
 if __name__ == "__main__":
