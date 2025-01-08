@@ -48,30 +48,34 @@ def get_citation(text, filename, metadata):
 
     # Step 1: Extract citation data from PDF text
     prompt = f"""
-    Extract the following information from the provided text:
-    1. Title of the work
-    2. Author(s) name(s)
-    3. Publication year
-    4. Publisher
-    5. Any other relevant bibliographic information
+    Extract bibliographic information from the provided text and return it in valid JSON format.
+    Use exactly this JSON structure:
+    {{
+        "title": "extracted title",
+        "author": "extracted author names",
+        "year": "publication year",
+        "publisher": "publisher name",
+        "other_info": "any other relevant information"
+    }}
 
     Text from first page: {text}
-
-    Provide the extracted information in a JSON format.
     """
     
     response = openai.chat.completions.create(
         model="gpt-4",
         messages=[
-            {"role": "system", "content": "You are an expert at extracting bibliographic information from academic texts."},
+            {"role": "system", "content": "You are an expert at extracting bibliographic information. Always respond with valid JSON."},
             {"role": "user", "content": prompt}
         ]
     )
 
     try:
-        pdf_data = json.loads(response.choices[0].message.content)
-    except json.JSONDecodeError:
-        print("Failed to parse JSON from AI response. Using fallback method.")
+        response_content = response.choices[0].message.content
+        print(f"AI Response: {response_content}")  # Debug line
+        pdf_data = json.loads(response_content)
+    except json.JSONDecodeError as e:
+        print(f"Failed to parse JSON from AI response: {str(e)}")
+        print(f"Raw response: {response_content}")
         # Fallback: use a simple dictionary with metadata
         pdf_data = {
             'title': metadata.get('title', '').strip('[]'),

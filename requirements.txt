@@ -1,3 +1,4 @@
-openai==0.27.0
-PyMuPDF==1.20.0
-python-dotenv==0.19.2
+--only-binary :all: PyMuPDF==1.23.26
+openai==1.14.0
+python-dotenv==1.0.1
+habanero==1.2.3
