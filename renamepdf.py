@@ -62,7 +62,7 @@ def get_citation(text, filename, metadata):
     """
     
     response = openai.chat.completions.create(
-        model="gpt-4",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are an expert at extracting bibliographic information. Always respond with valid JSON."},
             {"role": "user", "content": prompt}
@@ -144,7 +144,7 @@ def get_citation(text, filename, metadata):
     """
 
     citation_response = openai.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are an expert bibliographer. Generate a complete and accurate Chicago style citation based on the provided information."},
             {"role": "user", "content": citation_prompt}
@@ -275,7 +275,7 @@ def process_pdf_files(directory, max_pages, max_filename_length, option):
 
 if __name__ == "__main__":
     directory = input("\nEnter the directory path containing the PDF files: ")
-    max_pages = 1
+    max_pages = 5
     max_filename_length = 225
 
     print("\nWhat bibliographic information would you like to add:")
