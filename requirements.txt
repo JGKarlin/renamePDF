@@ -2,3 +2,4 @@
 openai==1.14.0
 python-dotenv==1.0.1
 habanero==1.2.3
+pyperclip==1.8.2
