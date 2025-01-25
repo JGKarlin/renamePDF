@@ -1,77 +1,120 @@
-### re-namePDF.py
-# PDF Citation Renamer and Metadata Generator
+# renamePDF
+
+An automated PDF citation and metadata management tool that intelligently renames academic PDF files and enriches their metadata using machine learning and academic databases.
 
 ## Overview
 
-This script renames PDF files based on their citation in Chicago bibliography style and adds the citation to the PDF metadata. It utilizes OpenAI's GPT-4o to generate the citation from the text extracted from the PDF files.
+renamePDF automatically processes PDF files by extracting content, generating standardized citations using OpenAI's GPT-4o, cross-referencing with Crossref, and updating both filenames and metadata accordingly. It uses Chicago bibliography style for citations and ensures cross-platform filename compatibility.
 
 ## Features
 
-- Extracts text from the first 3 pages of PDF files (but this variable can be changed since it affects the number of tokens processed)
-- Generates a citation in JSON format using OpenAI's GPT-4.
-- Renames PDF files to their citation in Chicago bibliography style.
-- Adds bibliographic metadata to PDF files.
-- Supports user choice for renaming files, adding metadata, or both.
+- Smart text extraction from PDF files with configurable page limits
+- Multi-source citation generation combining:
+  - OpenAI GPT-4o for content analysis
+  - Crossref API for academic verification
+  - PDF metadata extraction
+- Cross-platform compatible filename generation
+- Comprehensive metadata enrichment
+- Automated batch processing of multiple PDFs
+- Built-in error handling and recovery
+- Progress tracking with detailed processing summaries
 
 ## Requirements
 
 - Python 3.6+
-- `openai` library
-- `PyMuPDF` (also known as `fitz`)
-- `dotenv` library
+- OpenAI API key
+- Required Python packages:
+  - openai: For GPT-4o integration
+  - PyMuPDF (fitz): For PDF processing
+  - habanero: For Crossref API access
+  - python-dotenv: For environment management
+  - pyperclip: For clipboard operations
 
 ## Installation
 
 1. **Clone the repository:**
-    ```bash
-    git clone https://github.com/yourusername/pdf-citation-renamer.git
-    cd pdf-citation-renamer
-    ```
+```bash
+git clone https://github.com/jgkarlin/renamePDF.git
+cd renamePDF
+```
 
-2. **Create a virtual environment and activate it:**
-    ```bash
-    python -m venv venv
-    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-    ```
+2. **Set up Python environment:**
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-3. **Install the required packages:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-4. **Set up your OpenAI API key:**
-
-    Create a `.env` file in the root directory of the project and add your OpenAI API key:
-    ```plaintext
-    OPENAI_API_KEY=your_openai_api_key_here
-    ```
+3. **Configure API key:**
+Create a `.env` file in the project root:
+```plaintext
+OPENAI_API_KEY=your_openai_api_key_here
+```
 
 ## Usage
 
-1. **Run the script:**
-    ```bash
-    python renamepdf.py
-    ```
+The script processes PDF files from a directory path stored in your clipboard:
 
-2. **Follow the prompts:**
-    - Enter the directory path containing the PDF files.
-    - Choose how to add bibliographic information:
-      - `1`: Rename files only
-      - `2`: Add metadata only
-      - `3`: Both rename files and add metadata
-      - `4`: Quit
+1. **Copy directory path** to your clipboard
+2. **Run the script:**
+```bash
+python renamepdf.py
+```
 
-### Example
+The script will:
+- Process all PDF files in the specified directory
+- Generate standardized filenames based on citations
+- Update PDF metadata with bibliographic information
+- Provide a detailed processing summary
 
-```plaintext
-Enter the directory path containing the PDF files: /path/to/pdf/files
-Found 5 PDF files in the directory.
-Do you want to proceed with processing the files? (y/n): y
+### Generated Filenames
 
-What bibliographic information would you like to add:
-1. File name
-2. Metadata
-3. Both
-4. Quit
-Enter your choice (1, 2, 3, 4): 3
+Files are renamed using the format:
+```
+AuthorLastName[et al].YYYY.Title.pdf
+```
 
+For example:
+```
+Smith et al.2023.Machine Learning Applications in Historical Research.pdf
+```
+
+### Metadata Fields
+
+The script updates the following PDF metadata:
+- Title: Full paper title
+- Author: Complete author list
+- Subject: Journal and publisher information
+- Keywords: Additional bibliographic data
+
+## Error Handling
+
+The script includes comprehensive error handling for:
+- Invalid file paths
+- Corrupted PDF files
+- API failures
+- Permission issues
+- Duplicate filenames
+
+Failed operations are logged with detailed error messages in the processing summary.
+
+## MacOS Automator Integration
+
+You can set up the script as a Quick Action service in MacOS:
+
+1. Open Automator and create a new "Quick Action" workflow
+2. Set workflow to receive "folders" in "Finder.app"
+3. Add "Run Shell Script" action
+4. Configure the shell script:
+```bash
+# Use your Python interpreter path
+PYTHON_PATH="/usr/local/bin/python3"  # Default system Python
+# Alternative: PYTHON_PATH="$(which python3)"  # Active Python in PATH
+
+# Path to the script (adjust to your installation directory)
+SCRIPT_PATH="path/to/renamepdf.py"
+
+$PYTHON_PATH $SCRIPT_PATH
+```
+
+The workflow will appear in Finder's right-click menu, allowing you to process PDF files in any folder directly from Finder.

@@ -15,38 +15,91 @@ import fitz  # PyMuPDF
 import json
 from dotenv import load_dotenv
 from habanero import Crossref
+import pyperclip
 
 # Load environment variables from .env file
 load_dotenv()
 openai.api_key = os.environ['OPENAI_API_KEY']
 
 def extract_text_from_pdf(pdf_path, max_pages):
+    """
+    Extract text and metadata from a PDF file.
+    
+    Args:
+        pdf_path (str): Path to the PDF file
+        max_pages (int): Maximum number of pages to process
+        
+    Returns:
+        tuple: (extracted_text, metadata_dict)
+        
+    Raises:
+        ValueError: If max_pages is invalid or file is not accessible
+        RuntimeError: If PDF processing fails
+    """
+    if not os.path.exists(pdf_path):
+        raise ValueError(f"PDF file not found: {pdf_path}")
+        
+    if not isinstance(max_pages, int) or max_pages < 1:
+        raise ValueError("max_pages must be a positive integer")
+    
     text = ""
     relevant_metadata = {}
-    document = fitz.open(pdf_path)
     
-    # Extract and filter relevant metadata
-    full_metadata = document.metadata
-    relevant_fields = ['title', 'author']
-    
-    for field in relevant_fields:
-        if field in full_metadata and full_metadata[field]:
-            relevant_metadata[field] = full_metadata[field]
-    
-    # Extract text from pages
-    num_pages = min(len(document), max_pages)
-    for page_num in range(num_pages):
-        page = document.load_page(page_num)
-        text += page.get_text()
-    
-    document.close()
-    
-    return text, relevant_metadata
+    try:
+        document = fitz.open(pdf_path)
+    except Exception as e:
+        raise RuntimeError(f"Failed to open PDF: {str(e)}")
+        
+    try:
+        # Extract and filter relevant metadata
+        full_metadata = document.metadata
+        relevant_fields = ['title', 'author', 'subject', 'keywords', 'producer', 'creator']
+        
+        for field in relevant_fields:
+            if field in full_metadata and full_metadata[field]:
+                # Clean the metadata value
+                value = full_metadata[field].strip()
+                if value:  # Only add non-empty values
+                    relevant_metadata[field] = value
+        
+        # Extract text from pages
+        num_pages = min(len(document), max_pages)
+        for page_num in range(num_pages):
+            try:
+                page = document.load_page(page_num)
+                page_text = page.get_text()
+                if page_text:  # Only add non-empty pages
+                    text += page_text + "\n"
+            except Exception as e:
+                print(f"Warning: Failed to extract text from page {page_num}: {str(e)}")
+                continue
+                
+    except Exception as e:
+        raise RuntimeError(f"Failed to process PDF: {str(e)}")
+        
+    finally:
+        try:
+            document.close()
+        except:
+            pass  # Ignore errors during closing
+            
+    return text.strip(), relevant_metadata
 
 def get_citation(text, filename, metadata):
+    """
+    Extract citation information from PDF text using OpenAI API and Crossref.
+    
+    Args:
+        text (str): Extracted text from PDF
+        filename (str): Original filename
+        metadata (dict): PDF metadata
+        
+    Returns:
+        dict: Dictionary containing citation information
+    """
     cr = Crossref()
 
-    # Step 1: Extract citation data from PDF text
+    # Step 1: Extract citation data using OpenAI
     prompt = f"""
     Extract bibliographic information from the provided text and return it in valid JSON format.
     Use exactly this JSON structure:
@@ -55,237 +108,407 @@ def get_citation(text, filename, metadata):
         "author": "extracted author names",
         "year": "publication year",
         "publisher": "publisher name",
+        "journal": "journal title",
         "other_info": "any other relevant information"
     }}
 
-    Text from first page: {text}
+    Text from first page: {text[:1500]}
     """
     
-    response = openai.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are an expert at extracting bibliographic information. Always respond with valid JSON."},
-            {"role": "user", "content": prompt}
-        ]
-    )
-
     try:
-        response_content = response.choices[0].message.content
-        print(f"AI Response: {response_content}")  # Debug line
-        pdf_data = json.loads(response_content)
-    except json.JSONDecodeError as e:
-        print(f"Failed to parse JSON from AI response: {str(e)}")
-        print(f"Raw response: {response_content}")
-        # Fallback: use a simple dictionary with metadata
+        response = openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are an expert at extracting bibliographic information. Always respond with valid JSON."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        # Parse the OpenAI response once
+        pdf_data = json.loads(response.choices[0].message.content)
+        
+    except (openai.error.OpenAIError, json.JSONDecodeError) as e:
+        print(f"OpenAI API or JSON parsing error: {str(e)}")
         pdf_data = {
             'title': metadata.get('title', '').strip('[]'),
             'author': metadata.get('author', ''),
             'year': '',
-            'publisher': ''
+            'publisher': '',
+            'journal': ''
         }
 
-    # Step 2: Compare and supplement with metadata
-    metadata_title = metadata.get('title', '').strip('[]')
-    metadata_author = metadata.get('author', '')
+    # Clean and validate metadata
+    metadata_title = metadata.get('title', '').strip('[]').strip()
+    metadata_author = metadata.get('author', '').strip()
     
     if not pdf_data.get('title') and metadata_title:
         pdf_data['title'] = metadata_title
     if not pdf_data.get('author') and metadata_author:
         pdf_data['author'] = metadata_author
 
-    # Check for disagreements
-    use_crossref = False
-    if pdf_data.get('title') != metadata_title and metadata_title:
-        pdf_data['notes'] = f"Title disagreement. PDF: {pdf_data.get('title')}, Metadata: {metadata_title}"
-        use_crossref = True
-    if pdf_data.get('author') != metadata_author and metadata_author:
-        pdf_data['notes'] = pdf_data.get('notes', '') + f"\nAuthor disagreement. PDF: {pdf_data.get('author')}, Metadata: {metadata_author}"
-        use_crossref = True
-
-    # Step 3: Use Crossref if data is missing or there are disagreements
-    if use_crossref or not all([pdf_data.get('title'), pdf_data.get('author'), pdf_data.get('year'), pdf_data.get('publisher')]):
-        search_query = f"{pdf_data.get('title', '')} {pdf_data.get('author', '')}"
+    # Use Crossref as fallback
+    if not all([pdf_data.get('title'), pdf_data.get('author'), pdf_data.get('year')]):
         try:
+            search_query = f"{pdf_data.get('title', '')} {pdf_data.get('author', '')}"
             results = cr.works(query=search_query, limit=1)
-            if results['message']['total-results'] > 0:
+            
+            if results.get('message', {}).get('total-results', 0) > 0:
                 item = results['message']['items'][0]
-                
                 crossref_data = {
                     'title': item.get('title', [pdf_data.get('title', '')])[0],
-                    'author': ', '.join([f"{author.get('given', '')} {author.get('family', '')}" for author in item.get('author', [])]) or pdf_data.get('author', ''),
-                    'year': item.get('published-print', {}).get('date-parts', [['']])[0][0] or item.get('published-online', {}).get('date-parts', [['']])[0][0] or pdf_data.get('year', ''),
+                    'author': ', '.join([f"{author.get('given', '')} {author.get('family', '')}"
+                                       for author in item.get('author', [])]) or pdf_data.get('author', ''),
+                    'year': str(item.get('published-print', {}).get('date-parts', [['']])[0][0] or
+                              item.get('published-online', {}).get('date-parts', [['']])[0][0] or
+                              pdf_data.get('year', '')),
                     'publisher': item.get('publisher', '') or pdf_data.get('publisher', ''),
-                    'journal': item.get('container-title', [''])[0],
-                    'volume': item.get('volume', ''),
-                    'issue': item.get('issue', ''),
-                    'page': item.get('page', '')
+                    'journal': item.get('container-title', [''])[0]
                 }
+                # Update only if we have better data
+                pdf_data.update({k: v for k, v in crossref_data.items() if v})
                 
-                pdf_data.update(crossref_data)
-                pdf_data['notes'] = pdf_data.get('notes', '') + "\nCitation information supplemented using CrossRef."
-            else:
-                pdf_data['notes'] = pdf_data.get('notes', '') + "\nNo matching results found in CrossRef. Citation may be incomplete."
         except Exception as e:
-            pdf_data['notes'] = pdf_data.get('notes', '') + f"\nAttempt to verify citation with CrossRef failed: {str(e)}"
+            print(f"Crossref API error: {str(e)}")
 
-    # Generate Chicago style citation
-    citation_prompt = f"""
-    Generate a complete Chicago style citation for the following work:
-    Title: {pdf_data.get('title', '')}
-    Author(s): {pdf_data.get('author', '')}
-    Year: {pdf_data.get('year', '')}
-    Publisher: {pdf_data.get('publisher', '')}
-    Journal: {pdf_data.get('journal', '')}
-    Volume: {pdf_data.get('volume', '')}
-    Issue: {pdf_data.get('issue', '')}
-    Page: {pdf_data.get('page', '')}
+    # Ensure all values are strings
+    return {k: str(v) if v is not None else '' for k, v in pdf_data.items()}
 
-    Provide only the citation, no additional text.
+def build_filename(author, year, title, journal=None, max_length=225):
     """
-
-    citation_response = openai.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are an expert bibliographer. Generate a complete and accurate Chicago style citation based on the provided information."},
-            {"role": "user", "content": citation_prompt}
-        ]
-    )
+    Constructs a filename using author, year, and title.
     
-    pdf_data['citation'] = citation_response.choices[0].message.content.strip()
-
-    # Create shortened author string for filename
-    authors = pdf_data.get('author', '').split(',')
-    if len(authors) > 1:
-        short_author = authors[0].strip() + " et al."
+    Args:
+        author (str): Author name(s)
+        year (str): Publication year
+        title (str): Publication title
+        journal (str, optional): Journal name (unused, kept for backward compatibility)
+        max_length (int, optional): Maximum filename length minus extension. Defaults to 225.
+    
+    Returns:
+        str: Constructed filename with .pdf extension
+    """
+    components = []
+    
+    # Process author
+    if author:
+        # Handle et al. cases
+        author_parts = author.split(",")
+        first_author = author_parts[0].strip()
+        author_part = first_author + (" et al" if len(author_parts) > 1 else "")
+        components.append(author_part)
+    
+    # Process year
+    if year:
+        # Clean and validate year
+        year_clean = ''.join(filter(str.isdigit, str(year)))[:4]
+        if year_clean:
+            components.append(year_clean)
+    
+    # Process title
+    if title:
+        # Clean title: remove extra spaces and periods
+        title_clean = ' '.join(title.strip().split())
+        components.append(title_clean)
+    
+    # Join components with periods
+    base_name = ".".join(components)
+    
+    # Truncate at word boundary
+    if len(base_name) > (max_length - 4):  # -4 for .pdf
+        truncated = base_name[:max_length - 4].rsplit(' ', 1)[0].strip()
     else:
-        short_author = authors[0].strip()
+        truncated = base_name
     
-    pdf_data['short_citation'] = f"{short_author}, {pdf_data.get('year', '')}, {pdf_data.get('title', '')[:50]}..."
-
-    return json.dumps(pdf_data)
+    final_name = truncated + ".pdf"
+    print(f"Debug - build_filename output: {final_name}")
+    return final_name
 
 def sanitize_filename(filename):
+    """
+    Sanitize filename for cross-platform compatibility.
+    
+    Args:
+        filename (str): Original filename
+        
+    Returns:
+        str: Sanitized filename with .pdf extension
+    """
     # Remove any existing file extension
-    filename = os.path.splitext(filename)[0]
+    base = os.path.splitext(filename)[0]
     
-    # Sanitize the filename
-    sanitized = re.sub(r'[<>:"/\\|?*]', '', filename)
-    sanitized = sanitized.replace(': ', '-').replace(':', '-')
-    sanitized = sanitized.replace(u'\u201c', '"').replace(u'\u201d', '"').replace(u'\u2018', "'").replace(u'\u2019', "'")
+    # Define invalid characters including Windows reserved characters
+    invalid_chars = r'[<>:"/\\|?*\x00-\x1f]'
+    reserved_names = {
+        'CON', 'PRN', 'AUX', 'NUL',
+        'COM1', 'COM2', 'COM3', 'COM4',
+        'LPT1', 'LPT2', 'LPT3', 'LPT4'
+    }
     
-    # Limit the length and add the .pdf extension
-    sanitized = sanitized[:225] + '.pdf'
+    # Replace invalid characters
+    sanitized = re.sub(invalid_chars, '', base)
     
+    # Replace colons with dashes (no space after)
+    sanitized = re.sub(r'\s*:\s*', '-', sanitized)
+    
+    # Replace other separators with hyphens
+    sanitized = re.sub(r'[\t\n\r\v\f]', '-', sanitized)
+    
+    # Remove multiple hyphens and ensure no spaces around them
+    sanitized = re.sub(r'\s*-\s*', '-', sanitized)
+    sanitized = re.sub(r'-+', '-', sanitized)
+    
+    # Remove leading/trailing periods and spaces
+    sanitized = sanitized.strip('. ')
+    
+    # Check for Windows reserved names
+    if sanitized.upper() in reserved_names:
+        sanitized = f"_{sanitized}"
+    
+    # Ensure we have a valid filename
+    if not sanitized:
+        sanitized = "unnamed_document"
+    
+    # Always add .pdf extension
+    sanitized = sanitized + ".pdf"
+    
+    print(f"Debug - sanitize_filename output: {sanitized}")
     return sanitized
 
 def add_metadata_to_pdf(pdf_path, title, author, subject, keywords):
-    document = fitz.open(pdf_path)
+    """
+    Add or update metadata in a PDF file.
     
-    # Ensure keywords are in the correct format
+    Args:
+        pdf_path (str): Path to the PDF file
+        title (str): Document title
+        author (str): Document author
+        subject (str): Document subject
+        keywords (str or list): Keywords for the document
+    
+    Raises:
+        ValueError: If pdf_path is invalid or file doesn't exist
+        RuntimeError: If metadata update fails
+    """
+    if not os.path.exists(pdf_path):
+        raise ValueError(f"PDF file not found: {pdf_path}")
+        
+    # Convert keywords to string if necessary
     if isinstance(keywords, list):
-        keywords = ', '.join(keywords)
+        keywords = ', '.join(str(k).strip() for k in keywords if k)
     elif not isinstance(keywords, str):
         keywords = ""
 
-    # Ensure each metadata field is a string and handle any unexpected types
-    title = str(title) if title else ""
-    author = str(author) if author else ""
-    subject = str(subject) if subject else ""
-    keywords = str(keywords) if keywords else ""
-    
-    # Create a new metadata dictionary
+    # Clean and prepare metadata
     metadata = {
-        "title": title,
-        "author": author,
-        "subject": subject,
-        "keywords": keywords
+        "title": str(title).strip() if title else "",
+        "author": str(author).strip() if author else "",
+        "subject": str(subject).strip() if subject else "",
+        "keywords": str(keywords).strip() if keywords else ""
     }
 
-    # Removing any None values to avoid invalid keys in the metadata
+    # Remove empty fields
     metadata = {k: v for k, v in metadata.items() if v}
-
+    
+    # Create temporary directory
+    temp_dir = None
+    document = None
+    
     try:
-        # Set the new metadata, overwriting any existing metadata
+        # Open PDF
+        document = fitz.open(pdf_path)
+        
+        # Set metadata
         document.set_metadata(metadata)
         
-        # Get the base name of the file
-        base_name = os.path.basename(pdf_path)
-        
-        # Create a temporary directory
+        # Create temp directory for safe saving
         temp_dir = tempfile.mkdtemp()
+        temp_pdf = os.path.join(temp_dir, os.path.basename(pdf_path))
         
-        # Save the modified PDF file to the temporary directory
-        new_pdf_path = os.path.join(temp_dir, f"{base_name}_with_metadata.pdf")
-        document.save(new_pdf_path, garbage=4, deflate=True, clean=True)
+        # Save with optimization
+        document.save(
+            temp_pdf,
+            garbage=4,  # Maximum garbage collection
+            deflate=True,  # Compress streams
+            clean=True,  # Clean unused elements
+            pretty=False  # No pretty printing (smaller file)
+        )
+        
+        # Close before moving
         document.close()
+        document = None
         
-        # Move the modified PDF file to the original directory
-        shutil.move(new_pdf_path, pdf_path)
+        # Safely replace original file
+        shutil.move(temp_pdf, pdf_path)
+        
+    except fitz.FileDataError as e:
+        raise RuntimeError(f"Invalid or corrupted PDF file: {str(e)}")
+    except fitz.FileNotFoundError as e:
+        raise RuntimeError(f"PDF file not accessible: {str(e)}")
     except Exception as e:
-        print(f"Error setting metadata for {pdf_path}: {str(e)}")
-        document.close()
+        raise RuntimeError(f"Failed to update PDF metadata: {str(e)}")
+        
+    finally:
+        # Clean up resources
+        if document:
+            try:
+                document.close()
+            except:
+                pass
+                
+        # Remove temp directory if it exists
+        if temp_dir and os.path.exists(temp_dir):
+            try:
+                shutil.rmtree(temp_dir)
+            except:
+                pass  # Best effort cleanup
 
-def process_pdf_files(directory, max_pages, max_filename_length, option):
-    while True:
-        if not os.path.isdir(directory):
-            print(f"\nError: The directory '{directory}' does not exist.")
-            directory = input("\nPlease enter a valid directory path containing the PDF files: ")
+def process_pdf_files(directory):
+    """
+    Process all PDF files in a directory, extracting citations and renaming files.
+    
+    Args:
+        directory (str): Path to directory containing PDF files
+    
+    Returns:
+        dict: Summary of processing results
+        {
+            'total': number of files processed,
+            'successful': number of successful processes,
+            'failed': number of failures,
+            'errors': list of error messages
+        }
+    """
+    results = {
+        'total': 0,
+        'successful': 0,
+        'failed': 0,
+        'errors': []
+    }
+
+    print(f"Starting to process directory: {directory}")
+    
+    # Validate directory
+    if not os.path.exists(directory):
+        error_msg = f"Directory not found: {directory}"
+        results['errors'].append(error_msg)
+        print(f"Error: {error_msg}")
+        return results
+        
+    if not os.path.isdir(directory):
+        error_msg = f"Path is not a directory: {directory}"
+        results['errors'].append(error_msg)
+        print(f"Error: {error_msg}")
+        return results
+
+    # Get list of PDF files
+    try:
+        pdf_files = [f for f in os.listdir(directory) if f.lower().endswith(".pdf")]
+    except PermissionError:
+        error_msg = f"Permission denied accessing directory: {directory}"
+        results['errors'].append(error_msg)
+        print(f"Error: {error_msg}")
+        return results
+    except Exception as e:
+        error_msg = f"Error accessing directory: {str(e)}"
+        results['errors'].append(error_msg)
+        print(f"Error: {error_msg}")
+        return results
+
+    print(f"Found {len(pdf_files)} PDF files")
+    results['total'] = len(pdf_files)
+
+    # Process each PDF
+    for filename in pdf_files:
+        print(f"\nProcessing file: {filename}")
+        filepath = os.path.join(directory, filename)
+        
+        try:
+            # Check file access
+            if not os.access(filepath, os.R_OK | os.W_OK):
+                raise PermissionError(f"Insufficient permissions for file: {filename}")
+
+            # Extract text and metadata
+            text, metadata = extract_text_from_pdf(filepath, max_pages=1)
+            if not text and not metadata:
+                print("Warning: No text or metadata extracted")
+
+            # Get citation information
+            citation_metadata = get_citation(text, filename, metadata)
+            print(f"Extracted metadata: {citation_metadata}")
+
+            # Build new filename
+            new_filename = build_filename(
+                author=citation_metadata.get("author", "Unknown Author"),
+                year=str(citation_metadata.get("year", "")),
+                title=citation_metadata.get("title", "Unknown Title")
+            )
+            print(f"Built new filename: {new_filename}")
+
+            # Sanitize filename
+            sanitized_filename = sanitize_filename(new_filename)
+            print(f"Sanitized filename: {sanitized_filename}")
+            
+            new_filepath = os.path.join(directory, sanitized_filename)
+
+            # Rename file if needed
+            if filepath.lower() != new_filepath.lower():
+                # Check if target file already exists
+                if os.path.exists(new_filepath):
+                    base, ext = os.path.splitext(new_filepath)
+                    counter = 1
+                    while os.path.exists(f"{base}_{counter}{ext}"):
+                        counter += 1
+                    new_filepath = f"{base}_{counter}{ext}"
+                    print(f"File already exists, using: {os.path.basename(new_filepath)}")
+
+                os.rename(filepath, new_filepath)
+                print("File renamed successfully")
+                filepath = new_filepath  # Update filepath for metadata step
+
+            # Add metadata to PDF
+            add_metadata_to_pdf(
+                filepath,
+                title=citation_metadata.get("title", ""),
+                author=citation_metadata.get("author", ""),
+                subject=f"Journal: {citation_metadata.get('journal', '')} | Publisher: {citation_metadata.get('publisher', '')}",
+                keywords=citation_metadata.get("other_info", "")
+            )
+            print("Metadata added successfully")
+            
+            results['successful'] += 1
+
+        except PermissionError as e:
+            error_msg = f"Permission error processing {filename}: {str(e)}"
+            results['errors'].append(error_msg)
+            print(f"Error: {error_msg}")
+            results['failed'] += 1
+            continue
+            
+        except Exception as e:
+            error_msg = f"Error processing {filename}: {str(e)}"
+            results['errors'].append(error_msg)
+            print(f"Error: {error_msg}")
+            results['failed'] += 1
             continue
 
-        pdf_files = [f for f in os.listdir(directory) if f.endswith(".pdf")]
-        num_files = len(pdf_files)
-        print(f"\nFound {num_files} PDF files in the directory.")
-        confirm = input("\nDo you want to proceed with processing the files? (y/n): ")
-        if confirm.lower() != 'y':
-            print("\nProcessing canceled.")
-            return
+    # Print summary
+    print("\nProcessing Summary:")
+    print(f"Total files processed: {results['total']}")
+    print(f"Successful: {results['successful']}")
+    print(f"Failed: {results['failed']}")
+    if results['errors']:
+        print("\nErrors encountered:")
+        for error in results['errors']:
+            print(f"- {error}")
 
-        for filename in pdf_files:
-            filepath = os.path.join(directory, filename)
-            text, metadata = extract_text_from_pdf(filepath, max_pages)
-            citation_json = get_citation(text, filename, metadata)
-            
-            try:
-                citation_metadata = json.loads(citation_json)
-            except json.JSONDecodeError:
-                print(f"Failed to parse citation JSON for {filename}. Using fallback method.")
-                citation_metadata = {
-                    'citation': f"{metadata.get('author', 'Unknown Author')}. {metadata.get('title', 'Unknown Title')}.",
-                    'title': metadata.get('title', 'Unknown Title'),
-                    'author': metadata.get('author', 'Unknown Author')
-                }
-
-            title = citation_metadata.get("title", "")
-            author = citation_metadata.get("author", "")
-            subject = citation_metadata.get("subject", "")
-            keywords = citation_metadata.get("keywords", "")
-            citation = citation_metadata.get("citation", "")
-
-            if option in ["1", "3"]:
-                short_citation = citation_metadata.get("short_citation", "")
-                new_filename = sanitize_filename(short_citation)
-                new_filepath = os.path.join(directory, new_filename)
-                os.rename(filepath, new_filepath)
-                filepath = new_filepath
-                print(f"\nRenamed: {filename} -> {new_filename}")
-
-            if option in ["2", "3"]:
-                add_metadata_to_pdf(filepath, title, author, subject, keywords)
-        break
+    return results
 
 if __name__ == "__main__":
-    directory = input("\nEnter the directory path containing the PDF files: ")
-    max_pages = 5
-    max_filename_length = 225
-
-    print("\nWhat bibliographic information would you like to add:")
-    print("1. File name")
-    print("2. Metadata")
-    print("3. Both")
-    print("4. Quit")
-    option = input("\nEnter your choice (1, 2, 3, 4): ")
-
-    if option in ["1", "2", "3"]:
-        process_pdf_files(directory, max_pages, max_filename_length, option)
-    else:
-        print("\nExiting.")
+    try:
+        directory = pyperclip.paste().strip()
+        if directory:
+            process_pdf_files(directory)
+        else:
+            print("No directory path found in clipboard")
+    except Exception as e:
+        print(f"Error: {str(e)}")
