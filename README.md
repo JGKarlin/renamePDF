@@ -4,13 +4,13 @@ An automated PDF citation and metadata management tool that intelligently rename
 
 ## Overview
 
-renamePDF automatically processes PDF files by extracting content, generating standardized citations using OpenAI's GPT-4o, cross-referencing with Crossref, and updating both filenames and metadata accordingly. It uses Chicago bibliography style for citations and ensures cross-platform filename compatibility.
+renamePDF automatically processes PDF files by extracting content, generating standardized citations using OpenAI's GPT-4o-mini, cross-referencing with Crossref, and updating both filenames and metadata accordingly. It uses Chicago bibliography style for citations and ensures cross-platform filename compatibility.
 
 ## Features
 
 - Smart text extraction from PDF files with configurable page limits
 - Multi-source citation generation combining:
-  - OpenAI GPT-4o for content analysis
+  - OpenAI GPT-4o-mini for content analysis
   - Crossref API for academic verification
   - PDF metadata extraction
 - Cross-platform compatible filename generation
@@ -24,7 +24,7 @@ renamePDF automatically processes PDF files by extracting content, generating st
 - Python 3.6+
 - OpenAI API key
 - Required Python packages:
-  - openai: For GPT-4o integration
+  - openai: For GPT-4o-mini integration
   - PyMuPDF (fitz): For PDF processing
   - habanero: For Crossref API access
   - python-dotenv: For environment management
