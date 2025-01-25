@@ -53,9 +53,9 @@ OPENAI_API_KEY=your_openai_api_key_here
 
 ## Usage
 
-The script processes PDF files from a directory path stored in your clipboard:
+Important: The script reads the target directory path from your clipboard.
 
-1. **Copy directory path** to your clipboard
+1. **Copy the target directory path** to your clipboard using Cmd+C (MacOS) or Ctrl+C (Windows)
 2. **Run the script:**
 ```bash
 python renamepdf.py
@@ -117,4 +117,4 @@ SCRIPT_PATH="path/to/renamepdf.py"
 $PYTHON_PATH $SCRIPT_PATH
 ```
 
-The workflow will appear in Finder's right-click menu, allowing you to process PDF files in any folder directly from Finder.
+The workflow will appear in Finder's right-click menu. When invoked, it automatically copies the selected folder's path to clipboard and runs the script.
